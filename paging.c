@@ -28,6 +28,9 @@ struct program* remove_program(struct program* head, char name[], struct page** 
 int page_count(int size);
 int free_page_count(struct page* head);
 
+// Assembly function prototype
+extern int check_memory_availability(int freePages, int pagesNeeded);
+
 // Color codes for Linux terminal output
 #define RESET "\033[0m"
 #define RED "\033[1;31m"
@@ -127,7 +130,10 @@ int page_count(int size) {
 // Load program into memory
 struct program* load_program(struct program* head, char name[], int size, struct page** freePages) {
     int pagesNeeded = page_count(size);
-    if (free_page_count(*freePages) < pagesNeeded) {
+    int availablePages = free_page_count(*freePages);
+
+    // Call assembly function to check if sufficient memory is available
+    if (!check_memory_availability(availablePages, pagesNeeded)) {
         printf("%sInsufficient free pages for program %s%s\n", RED, name, RESET);
         return head;
     }
