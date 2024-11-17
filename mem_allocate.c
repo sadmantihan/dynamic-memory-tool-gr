@@ -1,59 +1,33 @@
-#include <stdio.h>
+#include "mem_allocate.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
-// Structures
-typedef struct MemoryBlock {
-    char block_status, process_status;
-    char process_code[10];
-    int start_address, size;
-    struct MemoryBlock *next, *previous;
-} MemoryBlock;
-
-typedef struct {
-    MemoryBlock *head;
-    int total_processes;
-} MemoryList;
-
-typedef struct Process {
-    char code[10];
-    char allocation_status, waiting_status;
-    int arrival_date, execution_time, memory_required;
-    struct Process *next, *previous;
-} Process;
-
-typedef struct {
-    Process *head, *tail;
-    int total_to_allocate, total_waiting;
-} ProcessList;
-
-typedef struct CommentNode {
-    char new_process[400], waiting_process[400], completed_process[400];
-    char selected_process[400], ready_process[400];
-    int timestamp;
-    struct CommentNode *next;
-} CommentNode;
-
-typedef struct {
-    CommentNode *head;
-} CommentList;
-
-// Functions to initialize structures
+// Initialize the memory list with the given total memory size
 void initialize_memory(MemoryList *memory, int total_memory_size) {
-    MemoryBlock *initial_block = malloc(sizeof(MemoryBlock));
-    if (!initial_block) {
-        printf("Error: Unable to allocate initial memory block!\n");
-        exit(EXIT_FAILURE);
-    }
-    memory->head = initial_block;
+    memory->head = NULL;
     memory->total_processes = 0;
-    *initial_block = (MemoryBlock) {'f', '\0', "", 0, total_memory_size, NULL, NULL};
+
+    // Create a single memory block that represents the whole memory
+    MemoryBlock *block = (MemoryBlock *)malloc(sizeof(MemoryBlock));
+    if (block == NULL) {
+        fprintf(stderr, "Memory allocation failed for memory block.\n");
+        exit(1);
+    }
+
+    block->start_address = 0;
+    block->size = total_memory_size;
+    block->block_status = 'f';  // 'f' for Free
+    block->process_status = 'N';  // 'N' for None (no process allocated)
+    block->process_code[0] = '\0';  // No process code
+    block->next = NULL;
+    block->previous = NULL;
+
+    // Set the memory list head to the created block
+    memory->head = block;
 }
 
-void initialize_comments(CommentList *comments) {
-    comments->head = NULL;
-}
-
+// Initialize the process list
 void initialize_processes(ProcessList *process_list) {
     process_list->head = NULL;
     process_list->tail = NULL;
@@ -61,173 +35,187 @@ void initialize_processes(ProcessList *process_list) {
     process_list->total_waiting = 0;
 }
 
-// Linux-compatible function to set console cursor position
-void set_console_cursor(int x, int y) {
-    printf("\033[%d;%dH", y + 1, x + 1); // ANSI escape code for cursor positioning
-}
-
-// Function to validate file format
-int validate_file_format(const char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        printf("Error: Unable to open the file '%s'!\n", filename);
-        return 0;
-    }
-
-    char line[100];
-    int line_count = 0, semicolon_count = 0;
-
-    while (fgets(line, sizeof(line), file)) {
-        if (strcmp(line, "\n") == 0) {
-            printf("Error: Avoid empty lines in the file!\n");
-            fclose(file);
-            return 0;
-        }
-        line_count++;
-        for (char *c = line; *c; c++) {
-            if (*c == ';') semicolon_count++;
-        }
-    }
-    fclose(file);
-
-    if (line_count == 0) {
-        printf("Error: The file is empty!\n");
-        return 0;
-    }
-    if (semicolon_count != 4 * line_count) {
-        printf("Error: Semicolons are misplaced in the file!\n");
-        return 0;
-    }
-    return 1;
-}
-
-// Function to add a comment
-void add_comment(CommentList *comments, int timestamp, const char *message, int type) {
-    CommentNode *current = comments->head;
-    CommentNode *new_node = malloc(sizeof(CommentNode));
-    if (!new_node) {
-        printf("Error: Memory allocation failed for comments!\n");
-        return;
-    }
-
-    *new_node = (CommentNode) { "none", "none", "none", "none", "none", timestamp, NULL };
-    if (!current) {
-        comments->head = new_node;
-    } else {
-        while (current->next && current->timestamp != timestamp) {
-            current = current->next;
-        }
-        if (current->timestamp == timestamp) {
-            free(new_node);
-            new_node = current; // Use existing node for the same timestamp
-        } else {
-            current->next = new_node;
-        }
-    }
-
-    switch (type) {
-        case 1: snprintf(new_node->new_process, sizeof(new_node->new_process), "New Process: %s loaded", message); break;
-        case 2: snprintf(new_node->waiting_process, sizeof(new_node->waiting_process), "Waiting Process: %s on hold", message); break;
-        case 3: snprintf(new_node->completed_process, sizeof(new_node->completed_process), "Completed Process: %s finished", message); break;
-        case 4: snprintf(new_node->selected_process, sizeof(new_node->selected_process), "Selected Process: %s elected", message); break;
-        case 5: snprintf(new_node->ready_process, sizeof(new_node->ready_process), "Ready Process: %s ready", message); break;
-    }
-}
-
-// Function to print the header for processes
-void print_process_header(void) {
-    printf("      ╔════════╦══════════╦════════════╦══════════╗\n");
-    printf("      ║ Process║ Arr. Date║ Mem Space  ║ Exec Time║\n");
-    printf("      ╠════════╬══════════╬════════════╬══════════╣\n");
-}
-
-// Function to load processes from a file
-void load_processes_from_file(ProcessList *process_list, const char *filename) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        printf("Error: Unable to open the file '%s'!\n", filename);
-        return;
-    }
-
-    char line[100];
-    while (fgets(line, sizeof(line), file)) {
-        Process *new_process = malloc(sizeof(Process));
-        if (!new_process) {
-            printf("Error: Memory allocation failed for process!\n");
-            fclose(file);
+// Function to allocate memory using First-Fit strategy
+void implement_first_fit(MemoryList *memory, Process *process) {
+    MemoryBlock *current = memory->head;
+    while (current) {
+        if (current->block_status == 'f' && current->size >= process->memory_required) {
+            // Split block if excess memory is available
+            if (current->size > process->memory_required) {
+                MemoryBlock *new_block = malloc(sizeof(MemoryBlock));
+                if (!new_block) {
+                    printf("Error: Memory allocation failed!\n");
+                    return;
+                }
+                *new_block = (MemoryBlock){'f', '\0', "", current->start_address + process->memory_required,
+                                           current->size - process->memory_required, current->next, current};
+                if (current->next) {
+                    current->next->previous = new_block;
+                }
+                current->next = new_block;
+                current->size = process->memory_required;
+            }
+            // Assign process to current block
+            current->block_status = 'a';  // 'a' for allocated
+            strcpy(current->process_code, process->code);
+            memory->total_processes++;
+            printf("Process %s allocated at address %d\n", process->code, current->start_address);
             return;
         }
+        current = current->next;
+    }
+    printf("Error: No suitable block found for process %s\n", process->code);
+}
 
-        sscanf(line, "%[^;];%d;%d;%d", new_process->code, &new_process->arrival_date, 
-               &new_process->memory_required, &new_process->execution_time);
-
-        new_process->allocation_status = 'N';
-        new_process->waiting_status = 'N';
-        new_process->next = NULL;
-        new_process->previous = process_list->tail;
-
-        if (process_list->tail) {
-            process_list->tail->next = new_process;
-        } else {
-            process_list->head = new_process;
+// Function to allocate memory using Best-Fit strategy
+void implement_best_fit(MemoryList *memory, Process *process) {
+    MemoryBlock *current = memory->head;
+    MemoryBlock *best_fit = NULL;
+    while (current) {
+        if (current->block_status == 'f' && current->size >= process->memory_required) {
+            if (!best_fit || current->size < best_fit->size) {
+                best_fit = current;
+            }
         }
-        process_list->tail = new_process;
-        process_list->total_to_allocate++;
-    }
-    fclose(file);
-}
-
-// Function to print comments
-void print_comments(const CommentList *comments) {
-    const CommentNode *current = comments->head;
-    printf("\n╔════════════════════════════════════════════════╗\n");
-    printf("║                  Comments Log                  ║\n");
-    printf("╚════════════════════════════════════════════════╝\n");
-    while (current) {
-        printf("Timestamp %d:\n", current->timestamp);
-        if (strcmp(current->new_process, "none")) printf("  %s\n", current->new_process);
-        if (strcmp(current->waiting_process, "none")) printf("  %s\n", current->waiting_process);
-        if (strcmp(current->completed_process, "none")) printf("  %s\n", current->completed_process);
-        if (strcmp(current->selected_process, "none")) printf("  %s\n", current->selected_process);
-        if (strcmp(current->ready_process, "none")) printf("  %s\n", current->ready_process);
-        printf("\n");
         current = current->next;
     }
+    if (best_fit) {
+        // Split the best fit block if necessary
+        if (best_fit->size > process->memory_required) {
+            MemoryBlock *new_block = malloc(sizeof(MemoryBlock));
+            if (!new_block) {
+                printf("Error: Memory allocation failed!\n");
+                return;
+            }
+            *new_block = (MemoryBlock){'f', '\0', "", best_fit->start_address + process->memory_required,
+                                       best_fit->size - process->memory_required, best_fit->next, best_fit};
+            if (best_fit->next) {
+                best_fit->next->previous = new_block;
+            }
+            best_fit->next = new_block;
+            best_fit->size = process->memory_required;
+        }
+        // Assign process to the best fit block
+        best_fit->block_status = 'a';  // 'a' for allocated
+        strcpy(best_fit->process_code, process->code);
+        printf("Process %s allocated at address %d\n", process->code, best_fit->start_address);
+    } else {
+        printf("Error: No suitable block found for process %s\n", process->code);
+    }
 }
 
-// Function to display processes
-void display_processes(const ProcessList *process_list) {
-    const Process *current = process_list->head;
-    print_process_header();
+// Function to display the memory map
+void display_memory_map(const MemoryList *memory) {
+    MemoryBlock *current = memory->head;
+    printf("\nMemory Map:\n");
+    printf("╔═══════╦═════════╦════════════════╦════════════╗\n");
+    printf("║ Start ║   Size  ║ Block Status   ║ Process ID ║\n");
+    printf("╠═══════╬═════════╬════════════════╬════════════╣\n");
     while (current) {
-        printf("      ║ %-8s║ %-10d║ %-11d║ %-10d║\n", 
-               current->code, current->arrival_date, 
-               current->memory_required, current->execution_time);
+        printf("║ %-5d ║ %-7d ║ %-14c ║ %-10s ║\n", current->start_address, current->size,
+               current->block_status, current->process_code);
         current = current->next;
     }
-    printf("      ╚════════╩══════════╩════════════╩══════════╝\n");
+    printf("╚═══════╩═════════╩════════════════╩════════════╝\n");
 }
 
-// Main function
+// Function to add a new process interactively
+void add_process_interactively(ProcessList *process_list) {
+    Process *new_process = malloc(sizeof(Process));
+    if (!new_process) {
+        printf("Error: Memory allocation failed for new process!\n");
+        return;
+    }
+    printf("\nEnter Process Details:\n");
+    printf("Process Code: ");
+    scanf("%s", new_process->code);
+    printf("Arrival Time: ");
+    scanf("%d", &new_process->arrival_date);
+    printf("Memory Required: ");
+    scanf("%d", &new_process->memory_required);
+    printf("Execution Time: ");
+    scanf("%d", &new_process->execution_time);
+
+    new_process->allocation_status = 'N';
+    new_process->waiting_status = 'N';
+    new_process->next = NULL;
+    new_process->previous = process_list->tail;
+
+    if (process_list->tail) {
+        process_list->tail->next = new_process;
+    } else {
+        process_list->head = new_process;
+    }
+    process_list->tail = new_process;
+    process_list->total_to_allocate++;
+
+    printf("Process %s added successfully!\n", new_process->code);
+}
+
+// Main menu function
+void menu() {
+    printf("\n╔══════════════════════════════╗\n");
+    printf("║       Memory Management      ║\n");
+    printf("╠══════════════════════════════╣\n");
+    printf("║ 1. Display Memory Map        ║\n");
+    printf("║ 2. Add a New Process         ║\n");
+    printf("║ 3. Allocate Memory (First-Fit)║\n");
+    printf("║ 4. Allocate Memory (Best-Fit)║\n");
+    printf("║ 5. Exit                      ║\n");
+    printf("╚══════════════════════════════╝\n");
+    printf("Enter your choice: ");
+}
+
 int main() {
     MemoryList memory;
     ProcessList process_list;
-    CommentList comments;
 
-    initialize_memory(&memory, 1024);
+    // Initialize structures
+    initialize_memory(&memory, 1024); // Total memory size = 1024
     initialize_processes(&process_list);
-    initialize_comments(&comments);
 
-    load_processes_from_file(&process_list, "process.txt");
-    add_comment(&comments, 1, "Process1", 1);
-    add_comment(&comments, 2, "Process2", 2);
-    add_comment(&comments, 3, "Process3", 3);
-
-    printf("\nProcesses Loaded:\n");
-    display_processes(&process_list);
-
-    printf("\nComments:\n");
-    print_comments(&comments);
+    int choice;
+    do {
+        menu();
+        scanf("%d", &choice);
+        switch (choice) {
+            case 1:
+                display_memory_map(&memory);
+                break;
+            case 2:
+                add_process_interactively(&process_list);
+                break;
+            case 3: {
+                Process *current = process_list.head;
+                while (current) {
+                    if (current->allocation_status == 'N') {
+                        implement_first_fit(&memory, current);
+                        current->allocation_status = 'Y';
+                        display_memory_map(&memory); // Show memory map after allocation
+                    }
+                    current = current->next;
+                }
+                break;
+            }
+            case 4: {
+                Process *current = process_list.head;
+                while (current) {
+                    if (current->allocation_status == 'N') {
+                        implement_best_fit(&memory, current);
+                        current->allocation_status = 'Y';
+                        display_memory_map(&memory); // Show memory map after allocation
+                    }
+                    current = current->next;
+                }
+                break;
+            }
+            case 5:
+                printf("Exiting program...\n");
+                break;
+            default:
+                printf("Invalid choice! Please try again.\n");
+        }
+    } while (choice != 5);
 
     return 0;
 }
