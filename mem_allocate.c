@@ -120,9 +120,9 @@ void add_comment(CommentList *comments, int timestamp, char *message, int type) 
 }
 
 void print_process_header(void) {
-    printf("      ╔════════╦══════════╦════════════╦══════════╗\n");
+    printf("      -------------------------------------------------\n");
     printf("        Process   Arr. Date   Mem Space   Exec Time\n");
-    printf("      ╠════════╬══════════╬════════════╬══════════╣\n");
+    printf("      -------------------------------------------------\n");
 }
 
 void load_processes_from_file(ProcessList *process_list, const char *filename) {
@@ -173,7 +173,7 @@ void display_processes(ProcessList *process_list) {
                current->memory_required, current->execution_time);
         current = current->next;
     }
-    printf("      ╚════════╩══════════╩════════════╩══════════╝\n");
+    printf("      -------------------------------------------------\n");
 }
 
 int main() {
@@ -201,4 +201,4 @@ int main() {
     print_comments(&comments);
 
     return 0;
-}
+} 
