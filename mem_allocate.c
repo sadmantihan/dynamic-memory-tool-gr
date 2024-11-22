@@ -35,6 +35,18 @@ void initialize_processes(ProcessList *process_list) {
     process_list->total_waiting = 0;
 }
 
+// Function to check memory availability (added definition)
+int check_memory_availability(MemoryList *memory, int memory_required) {
+    MemoryBlock *current = memory->head;
+    while (current) {
+        if (current->block_status == 'f' && current->size >= memory_required) {
+            return 1;  // Memory is available
+        }
+        current = current->next;
+    }
+    return 0;  // No suitable memory block found
+}
+
 // Function to allocate memory using First-Fit strategy
 void implement_first_fit(MemoryList *memory, Process *process) {
     MemoryBlock *current = memory->head;
